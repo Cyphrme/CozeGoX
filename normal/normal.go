@@ -67,7 +67,7 @@ package normal
 import (
 	"encoding/json"
 
-	"github.com/cyphrme/coze"
+	"github.com/cyphrme/orderedmap"
 	"golang.org/x/exp/slices"
 )
 
@@ -166,12 +166,12 @@ func Merge[T ~[]Normal](norms ...T) any {
 // Normals are interpreted as a chain that progress a record pointer based on
 // normal rules.  See notes on Normal.  Parameters may be nil.
 func IsNormal(pay json.RawMessage, norm ...Normaler) (bool, error) {
-	ms := coze.MapSlice{}
-	err := json.Unmarshal(pay, &ms)
+	om := orderedmap.New()
+	err := json.Unmarshal(pay, &om)
 	if err != nil {
 		return false, err
 	}
-	return isNormal(ms, 0, 0, false, norm...), nil
+	return isNormal(om, 0, 0, false, norm...), nil
 }
 
 // isNormal checks if datastructure conforms to the given normal chain. See docs
@@ -188,14 +188,14 @@ func IsNormal(pay json.RawMessage, norm ...Normaler) (bool, error) {
 //	            Norm is an Extra.  When set to true, it moves the record pointer
 //	            to the first field matching the following Normal.
 //	norms -     The Normal chain, the full slice of normals.
-func isNormal(r coze.MapSlice, rSkip int, nSkip int, extraFlag bool, norms ...Normaler) bool {
+func isNormal(r *orderedmap.OrderedMap, rSkip int, nSkip int, extraFlag bool, norms ...Normaler) bool {
 	if nSkip >= len(norms) {
 		return true
 	}
 	norm := norms[nSkip]
 
 	if extraFlag { // Progress record pointer to first match.
-		keys := r[rSkip:].Keys()
+		keys := r.Keys()[rSkip:]
 		var i int
 		for i = 0; i < len(keys); i++ {
 			if slices.Contains(norm.Normal(), Normal(keys[i])) {
@@ -204,7 +204,7 @@ func isNormal(r coze.MapSlice, rSkip int, nSkip int, extraFlag bool, norms ...No
 			}
 		}
 		// TODO this might be written better:
-		if i+1 >= len(r) { // If option is missing after an extra, return true.
+		if i+1 >= r.Len() { // If option is missing after an extra, return true.
 			if Type(norm) == "option" {
 				return true
 			}
@@ -221,7 +221,7 @@ func isNormal(r coze.MapSlice, rSkip int, nSkip int, extraFlag bool, norms ...No
 		return isNormal(r, rSkip, nSkip+1, true, norms...)
 	case Canon, Only, Option:
 		// Last norm does not allow extra records
-		if nSkip+1 == len(norms) && norm.Len() < len(r)-rSkip {
+		if nSkip+1 == len(norms) && norm.Len() < r.Len()-rSkip {
 			return false
 		}
 	}
@@ -231,20 +231,21 @@ func isNormal(r coze.MapSlice, rSkip int, nSkip int, extraFlag bool, norms ...No
 	passedRecs := 0
 	switch v := norm.(type) {
 	case Canon:
-		if norm.Len() > len(r)-rSkip {
+		if norm.Len() > r.Len()-rSkip {
 			return false
 		}
 		for i, n := range v {
-			if n != Normal(r[rSkip+i].Key) {
+			k, _ := r.GetKeyAt(rSkip + i) // TODO consider the omission of bool
+			if n != Normal(k) {
 				return false
 			}
 			passedRecs++
 		}
 	case Only:
-		if norm.Len() > len(r)-rSkip {
+		if norm.Len() > r.Len()-rSkip {
 			return false
 		}
-		keys := r[rSkip : v.Len()+rSkip].Keys()
+		keys := r.Keys()[rSkip : v.Len()+rSkip]
 		slices.Sort(keys)
 		slices.Sort(v)
 		for i := range v {
@@ -254,7 +255,7 @@ func isNormal(r coze.MapSlice, rSkip int, nSkip int, extraFlag bool, norms ...No
 			passedRecs++
 		}
 	case Option:
-		keys := r[rSkip:].Keys()
+		keys := r.Keys()[rSkip:]
 		for i, n := range keys {
 			if !slices.Contains(v, Normal(n)) {
 				if nSkip+1 == len(norms) { // last norm
@@ -271,7 +272,7 @@ func isNormal(r coze.MapSlice, rSkip int, nSkip int, extraFlag bool, norms ...No
 	case Need:
 		i := 0
 		key := ""
-		keys := r[rSkip:].Keys()
+		keys := r.Keys()[rSkip:]
 		for i, key = range keys {
 			if passedRecs == v.Len() {
 				break
@@ -319,22 +320,24 @@ func IsNormalUnchained(pay json.RawMessage, norm ...Normaler) (bool, error) {
 // the option(s) concatenated with the need(s).  This is logically equivalent to
 // subtracting the need.
 func IsNormalNeedOption(pay json.RawMessage, need Need, option Option) (bool, error) {
-	ms := coze.MapSlice{}
-	err := json.Unmarshal(pay, &ms)
+	om := orderedmap.New()
+	err := json.Unmarshal(pay, &om)
 	if err != nil {
 		return false, err
 	}
 
-	if !isNormal(ms, 0, 0, false, need) {
+	if !isNormal(om, 0, 0, false, need) {
 		return false, nil
 	}
 
-	// TODO add function "delete" to map slice.
-	ms2 := coze.MapSlice{}
-	for _, mi := range ms {
-		if !slices.Contains(need, Normal(mi.Key)) {
-			ms2 = append(ms2, coze.MapItem{Key: mi.Key, Value: mi.Value})
+	keys := om.Keys()
+	o := orderedmap.New()
+	for _, k := range keys {
+		if !slices.Contains(need, Normal(k)) {
+			v, _ := om.Get(k) // TODO consider omitting bool.
+			o.Set(k, v)
 		}
 	}
-	return isNormal(ms2, 0, 0, false, option), nil
+	return isNormal(o, 0, 0, false, option), nil
+
 }
