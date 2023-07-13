@@ -235,7 +235,7 @@ func isNormal(r *orderedmap.OrderedMap, rSkip int, nSkip int, extraFlag bool, no
 			return false
 		}
 		for i, n := range v {
-			k, _ := r.GetKeyAt(rSkip + i) // TODO consider the omission of bool
+			k := r.GetKeyAt(rSkip + i)
 			if n != Normal(k) {
 				return false
 			}
@@ -334,7 +334,7 @@ func IsNormalNeedOption(pay json.RawMessage, need Need, option Option) (bool, er
 	o := orderedmap.New()
 	for _, k := range keys {
 		if !slices.Contains(need, Normal(k)) {
-			v, _ := om.Get(k) // TODO consider omitting bool.
+			v := om.Get(k)
 			o.Set(k, v)
 		}
 	}
